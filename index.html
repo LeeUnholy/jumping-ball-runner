@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jumping Ball Runner</title>
+<style>
+  :root{
+    --amz-navy:#232f3e; --amz-orange:#ff9900; --amz-teal:#00a8e1; --amz-cream:#fff7e6; --amz-green:#00a650;
+    --bg1: var(--amz-cream); --bg2:#fde7c0;
+  }
+  html,body{height:100%;margin:0}
+  body{background:linear-gradient(180deg,var(--bg1),var(--bg2));font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;color:#0b1020;overflow:hidden}
+  .wrap{position:relative;width:100%;height:100%;display:grid;place-items:center}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .hud{position:absolute;top:14px;left:14px;display:flex;gap:12px;align-items:center;font-weight:700}
+  .chip{background:rgba(255,255,255,.8);backdrop-filter:blur(8px);padding:8px 12px;border-radius:999px;box-shadow:0 6px 16px rgba(0,0,0,.12)}
+  .hud .label{opacity:.7;font-weight:600;margin-right:6px}
+  .center-ui{position:absolute;display:grid;place-items:center;inset:0;pointer-events:none}
+  .panel{pointer-events:auto;text-align:center;background:rgba(255,255,255,.9);border:2px solid var(--amz-navy);border-radius:18px;padding:18px 22px;box-shadow:0 16px 50px rgba(0,0,0,.25)}
+  h1{margin:0 0 6px;font-size:clamp(22px,4vw,34px);letter-spacing:.5px;color:var(--amz-navy)}
+  p{margin:6px 0 14px}
+  .btn{appearance:none;border:none;cursor:pointer;font-weight:800;letter-spacing:.3px;border-radius:12px;padding:12px 18px;margin:8px;background:linear-gradient(135deg,var(--amz-orange),#ffb84d);color:#111;box-shadow:0 10px 24px rgba(255,153,0,.3);transition:transform .08s ease,filter .08s ease}
+  .btn:hover{transform:translateY(-1px)}.btn:active{transform:translateY(1px);filter:saturate(1.1)}
+  .btn.secondary{background:linear-gradient(135deg,var(--amz-green),#64d78f);color:white;box-shadow:0 10px 24px rgba(0,166,80,.35)}
+  .hint{font-size:13px;opacity:.8}
+  .credits{position:absolute;right:14px;top:14px;background:rgba(255,255,255,.85);padding:8px 12px;border-radius:999px;border:1px solid var(--amz-navy)}
+  .tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:800;color:white}
+  .tag.coupon{background:var(--amz-green)} .tag.deal{background:var(--amz-orange)} .tag.prime{background:var(--amz-teal)}
+  .slider{display:flex;align-items:center;gap:8px}
+  .slider input{accent-color:var(--amz-orange)}
+  @media (max-width:720px){.hud{gap:8px}.chip{font-size:14px}}
+  .test-badge{position:absolute;bottom:10px;right:10px;background:rgba(255,255,255,.9);padding:6px 10px;border:1px solid var(--amz-navy);border-radius:999px;font-size:12px;display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <canvas id="game"></canvas>
+  <div class="hud" aria-live="polite">
+    <div class="chip"><span class="label">Score</span><span id="score">0</span></div>
+    <div class="chip"><span class="label">Best</span><span id="best">0</span></div>
+    <div class="chip"><span class="label">Speed</span><span id="speed">1.00x</span></div>
+    <div class="chip slider" title="全局速度（越小越慢）">
+      <span class="label">速率</span>
+      <input id="speedSlider" type="range" min="0.10" max="1.00" step="0.05" value="0.20" />
+      <span id="speedMulLabel">×0.20</span>
+    </div>
+  </div>
+  <div class="credits chip">🛒 <strong>Jumping Ball Runner</strong> <span class="tag deal" style="margin-left:8px">BEST DEAL</span></div>
+  <div class="center-ui" id="overlay">
+    <div class="panel" id="startPanel">
+      <h1>Jumping Ball Runner</h1>
+      <p>Amazon‑style aisles！<b>道具只在空中</b>（单/双跳可吃到）：Coupon（+10）/ Best Deal（+5）。地面为危险：404 Dog（死）、Out of Stock（减速−10分）、Return Storm（反向）、1★（−5）。</p>
+      <button class="btn" id="playBtn">Play</button>
+      <div class="hint">Space/↑/点击 跳跃 • <b>无限跳</b>（空中更弱）</div>
+    </div>
+    <div class="panel" id="gameOverPanel" style="display:none">
+      <h1>Uh‑oh! Link Went Dog 🐶</h1>
+      <p><span id="finalScore">0</span> points • Best <span id="finalBest">0</span></p>
+      <div>
+        <button class="btn secondary" id="retryBtn">Retry</button>
+        <button class="btn" id="shareBtn">Share Score</button>
+      </div>
+      <div class="hint">提示：道具只在空中，地面碰到基本都不好。</div>
+    </div>
+  </div>
+  <div class="test-badge" id="testBadge">✅ Tests passed</div>
+</div>
+<script>
+(function(){
+  'use strict';
+  // ------ Canvas & DPI setup ------
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  let W=0,H=0, DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  function resize(){
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    canvas.width = (W*DPR)|0; canvas.height = (H*DPR)|0; ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize, {passive:true});
+  resize();
+
+  // ------ RNG ------
+  const rand = (a=0,b=1)=>a+Math.random()*(b-a);
+
+  // ------ Game State ------
+  const state = {
+    running:false, t:0,
+    speed:4, baseSpeed:4, accel:0.0012,
+    gravity:0.6, jumpV:-13.5, airJumpFactor:0.7, // 单跳更高
+    score:0, best:Number(localStorage.getItem('jbr_best')||0),
+    obstacles:[], dust:[], clouds:[], stars:[],
+    slowTimer:0, invertTimer:0, shakeTimer:0,
+  };
+  // 全局速度倍率（默认 1/5） & 生成间隔倍率（道具更稀疏 ×10）
+  let speedScale = 0.20; const SPAWN_GAP_MULT = 10;
+
+  // ------ UI elements ------
+  const $score = document.getElementById('score');
+  const $best = document.getElementById('best');
+  const $speed = document.getElementById('speed');
+  const $overlay = document.getElementById('overlay');
+  const $startPanel = document.getElementById('startPanel');
+  const $gameOverPanel = document.getElementById('gameOverPanel');
+  const $finalScore = document.getElementById('finalScore');
+  const $finalBest = document.getElementById('finalBest');
+  const $speedSlider = document.getElementById('speedSlider');
+  const $speedMulLabel = document.getElementById('speedMulLabel');
+  $best.textContent = state.best;
+
+  // 速度滑条
+  $speedSlider.addEventListener('input', ()=>{
+    speedScale = Math.max(0.1, Math.min(1, parseFloat($speedSlider.value)||0.2));
+    $speedMulLabel.textContent = '×'+speedScale.toFixed(2);
+  });
+
+  // ------ Player ------
+  const player = { x:140, y:0, r:26, vy:0, onGround:false, blinkT:0 };
+  const groundY = ()=> H * 0.78;
+
+  // ------ Input ------
+  let jumpQueued=false; function queueJump(){ jumpQueued=true; }
+  window.addEventListener('keydown', (e)=>{ if(['Space','ArrowUp','KeyW'].includes(e.code)){ e.preventDefault(); queueJump(); }});
+  window.addEventListener('pointerdown', queueJump);
+
+  // ------ Sounds ------
+  const AudioCtx = window.AudioContext || window.webkitAudioContext; let actx=null; let masterGain=null;
+  function ensureAudio(){ if(!actx){ actx=new AudioCtx(); masterGain=actx.createGain(); masterGain.gain.value=0.2; masterGain.connect(actx.destination);} }
+  function beep({type='sine', start=440, end=660, time=0.12, gain=0.35, curve='exp'}){
+    if(!actx) return; const osc=actx.createOscillator(), g=actx.createGain(); osc.type=type; osc.connect(g); g.connect(masterGain);
+    const t0=actx.currentTime; if(curve==='exp'){ osc.frequency.setValueAtTime(Math.max(1,start),t0); osc.frequency.exponentialRampToValueAtTime(Math.max(1,end),t0+time); g.gain.setValueAtTime(gain,t0); g.gain.exponentialRampToValueAtTime(0.0001,t0+time); } else { osc.frequency.setValueAtTime(start,t0); osc.frequency.linearRampToValueAtTime(end,t0+time); g.gain.setValueAtTime(gain,t0); g.gain.linearRampToValueAtTime(0.0001,t0+time);} osc.start(t0); osc.stop(t0+time+0.02);
+  }
+  const SFX={ jump:()=>{ensureAudio();beep({type:'triangle',start:600,end:900,time:0.12});}, land:()=>{ensureAudio();beep({type:'square',start:220,end:140,time:0.12});}, score:()=>{ensureAudio();beep({type:'sine',start:880,end:1320,time:0.09});}, pickup:()=>{ensureAudio();beep({type:'sine',start:660,end:1320,time:0.12});}, deal:()=>{ensureAudio();beep({type:'square',start:440,end:660,time:0.1});}, boo:()=>{ensureAudio();beep({type:'triangle',start:300,end:200,time:0.18});}, slow:()=>{ensureAudio();beep({type:'sine',start:220,end:220,time:0.25});}, storm:()=>{ensureAudio();beep({type:'sawtooth',start:160,end:80,time:0.25});}, crash:()=>{ensureAudio();beep({type:'sawtooth',start:300,end:60,time:0.35,curve:'lin'});}, whoosh:()=>{ensureAudio();beep({type:'sine',start:200,end:400,time:0.18});} };
+
+  // ------ Parallax Background ------
+  function spawnCloud(){ state.clouds.push({x:W+rand(0,200), y:rand(40,H*0.45), s:rand(0.3,1.1)}); }
+  for(let i=0;i<6;i++) spawnCloud(); for(let i=0;i<40;i++) state.stars.push({x:rand(0,W), y:rand(0,H*0.25), r:rand(0.5,1.5)});
+  function drawBackground(dt,effSpeed){
+    for(let i=0;i<6;i++){ const x=(i*240 - (state.t*effSpeed*1.1)%240)+160; const y=60+(i%2)*20; drawBanner(x,y, i%3===0?'COUPON':i%3===1?'BEST DEAL':'LIGHTNING'); }
+    drawShelves(H*0.62,0.5,'#fde3b2'); drawShelves(H*0.67,0.8,'#ffd99a');
+    ctx.fillStyle='rgba(0,0,0,.08)'; for(let x=((state.t*effSpeed)%50); x<W+80; x+=50){ ctx.fillRect(x-2, groundY()+6, 26, 6); } ctx.fillStyle='#c9c3b3'; ctx.fillRect(0, groundY()+12, W, H);
+  }
+  function drawBanner(x,y,label){ ctx.save(); ctx.fillStyle= label==='COUPON'? '#00a650' : (label==='BEST DEAL'? '#ff9900' : '#00a8e1'); ctx.fillRect(x-48,y-12,96,24); ctx.fillStyle='#fff'; ctx.font='bold 12px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(label,x,y+1); ctx.restore(); }
+  function drawShelves(base,scale,color){ ctx.save(); ctx.fillStyle=color; ctx.globalAlpha=.9; ctx.beginPath(); ctx.moveTo(0,H); for(let x=0;x<=W;x+=24){ const h=Math.sin((x+state.t*scale*38)*0.003)*18 + Math.cos((x-120+state.t*scale*42)*0.002)*12; ctx.lineTo(x, base - h*scale);} ctx.lineTo(W,H); ctx.closePath(); ctx.fill(); ctx.restore(); }
+
+  // ------ Spawning: 空中道具、地面危险 ------
+  function jumpApex(v){ return (v*v)/(2*state.gravity); } // 顶点高度
+  const LANE_SINGLE = ()=> Math.max(80, Math.min(220, Math.round(jumpApex(-state.jumpV)*0.85))); // 单跳可达（因 jumpV 提升，范围更高）
+  const LANE_DOUBLE = ()=> Math.max(130, Math.min(300, Math.round(jumpApex(-state.jumpV) + jumpApex(-state.jumpV*state.airJumpFactor)*0.9))); // 双跳可达
+
+  function spawnObstacle(){
+    const r = Math.random(); let type;
+    // Coupon/Deal（空中）: 40%, 25% ; Hazards（地面）: OOS 12%, 1★ 12%, Storm 6%, 404 5%
+    if(r<0.40) type='coupon'; else if(r<0.65) type='deal'; else if(r<0.77) type='outofstock'; else if(r<0.89) type='badreview'; else if(r<0.95) type='returnstorm'; else type='dog404';
+
+    const dims = { coupon:[rand(46,80), rand(30,54)], deal:[rand(28,44), rand(40,70)], outofstock:[rand(40,70), rand(28,50)], badreview:[rand(36,56), rand(28,46)], returnstorm:[rand(42,62), rand(42,62)], dog404:[rand(40,60), rand(40,60)] }[type];
+    const [w,h] = dims; let y;
+    if(type==='coupon' || type==='deal'){
+      const lane = Math.random()<0.5 ? LANE_SINGLE() : LANE_DOUBLE();
+      y = groundY() - h - lane; // 空中可吃
+    } else {
+      y = groundY() - h; // 地面危险
+    }
+    state.obstacles.push({ x: W + rand(0,80), y, w, h, type });
+  }
+
+  function drawObstacle(o){
+    if(o.type==='coupon'){
+      ctx.fillStyle='#fff'; ctx.fillRect(o.x,o.y,o.w,o.h); ctx.strokeStyle='#888'; ctx.setLineDash([4,4]); ctx.lineWidth=2; ctx.strokeRect(o.x+2,o.y+2,o.w-4,o.h-4); ctx.setLineDash([]); ctx.fillStyle='#00a650'; ctx.fillRect(o.x, o.y-8, Math.min(o.w,42), 16); ctx.fillStyle='#fff'; ctx.font='bold 10px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('COUPON', o.x+Math.min(o.w,42)/2, o.y);
+    } else if(o.type==='deal'){
+      ctx.fillStyle='#ff9900'; ctx.fillRect(o.x,o.y,o.w,o.h); ctx.fillStyle='#232f3e'; ctx.font='bold 10px system-ui'; ctx.save(); ctx.translate(o.x+o.w/2,o.y+o.h/2); ctx.rotate(-Math.PI/2); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('BEST DEAL',0,0); ctx.restore(); ctx.strokeStyle='#b36b00'; ctx.lineWidth=2; ctx.strokeRect(o.x+1.5,o.y+1.5,o.w-3,o.h-3);
+    } else if(o.type==='outofstock'){
+      ctx.fillStyle='#f7d154'; ctx.beginPath(); ctx.moveTo(o.x+o.w/2,o.y); ctx.lineTo(o.x,o.y+o.h); ctx.lineTo(o.x+o.w,o.y+o.h); ctx.closePath(); ctx.fill(); ctx.strokeStyle='#b38800'; ctx.lineWidth=2; ctx.stroke(); ctx.fillStyle='#232f3e'; ctx.font='bold 10px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('OOS', o.x+o.w/2, o.y+o.h*0.65);
+    } else if(o.type==='badreview'){
+      ctx.fillStyle='#d6d6d6'; ctx.fillRect(o.x,o.y,o.w,o.h); ctx.strokeStyle='#9a9a9a'; ctx.lineWidth=2; ctx.strokeRect(o.x+1,o.y+1,o.w-2,o.h-2); ctx.fillStyle='#333'; ctx.font='bold 11px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('1★', o.x+o.w/2, o.y+o.h/2);
+    } else if(o.type==='returnstorm'){
+      ctx.fillStyle='#00a8e1'; cloudShape(o.x,o.y,o.w,o.h); ctx.fillStyle='#fff'; ctx.font='bold 10px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('↕', o.x+o.w/2, o.y+o.h/2);
+    } else { // dog404
+      ctx.fillStyle='#cfcfcf'; ctx.fillRect(o.x,o.y,o.w,o.h); ctx.strokeStyle='#8b8b8b'; ctx.lineWidth=2; ctx.strokeRect(o.x+1,o.y+1,o.w-2,o.h-2); ctx.fillStyle='#333'; ctx.font='bold 12px system-ui'; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText('404', o.x+o.w/2, o.y+4); const cx=o.x+o.w/2, cy=o.y+o.h-12, pr=3; ctx.beginPath(); ctx.arc(cx,cy,pr+2,0,Math.PI*2); ctx.arc(cx-8,cy-6,pr,0,Math.PI*2); ctx.arc(cx+8,cy-6,pr,0,Math.PI*2); ctx.arc(cx-3,cy-9,pr,0,Math.PI*2); ctx.arc(cx+3,cy-9,pr,0,Math.PI*2); ctx.fill();
+    }
+  }
+  function cloudShape(x,y,w,h){ ctx.beginPath(); ctx.arc(x+w*0.3,y+h*0.5,h*0.35,0,Math.PI*2); ctx.arc(x+w*0.5,y+h*0.4,h*0.4,0,Math.PI*2); ctx.arc(x+w*0.7,y+h*0.5,h*0.35,0,Math.PI*2); ctx.fill(); }
+
+  // ------ Dust ------
+  function puff(x,y){ for(let i=0;i<10;i++) state.dust.push({x:x+rand(-4,4),y:y+rand(-2,2),vx:rand(-2,2),vy:rand(-3,-0.5),r:rand(1,3),a:0.7}); }
+
+  // ------ Control ------
+  let last=0, spawnTimer=0;
+  function reset(){ state.t=0; state.speed=state.baseSpeed; state.score=0; state.obstacles.length=0; state.dust.length=0; spawnTimer=0; state.slowTimer=0; state.invertTimer=0; state.shakeTimer=0; player.y=groundY()-player.r; player.vy=0; player.onGround=true; player.blinkT=0; $score.textContent='0'; $speed.textContent='1.00x'; }
+  function start(){ ensureAudio(); $overlay.style.display='none'; $startPanel.style.display='none'; $gameOverPanel.style.display='none'; state.running=true; reset(); last=performance.now(); requestAnimationFrame(loop); }
+  function gameOver(){ state.running=false; SFX.crash(); $overlay.style.display='grid'; $gameOverPanel.style.display='block'; $finalScore.textContent=Math.floor(state.score); if(state.score>state.best){ state.best=Math.floor(state.score); localStorage.setItem('jbr_best', state.best);} $finalBest.textContent=state.best; $best.textContent=state.best; }
+
+  // ------ Jump Logic ------
+  function tryJump(){ if(state.invertTimer>0){ player.vy = Math.abs(state.jumpV)*0.7; } else { player.vy = (player.onGround? state.jumpV : state.jumpV*state.airJumpFactor); } player.onGround=false; SFX.jump(); }
+
+  // ------ Collision Handling ------
+  function handleCollision(o, idx){ if(o.type==='coupon'){ state.score+=10; SFX.pickup(); state.obstacles.splice(idx,1);} else if(o.type==='deal'){ state.score+=5; SFX.deal(); state.obstacles.splice(idx,1);} else if(o.type==='outofstock'){ state.score=Math.max(0,state.score-10); SFX.slow(); state.slowTimer=3; state.obstacles.splice(idx,1);} else if(o.type==='badreview'){ state.score=Math.max(0,state.score-5); SFX.boo(); state.obstacles.splice(idx,1);} else if(o.type==='returnstorm'){ SFX.storm(); state.invertTimer=3; state.shakeTimer=1.2; state.obstacles.splice(idx,1);} else if(o.type==='dog404'){ gameOver(); } }
+
+  // ------ Main Loop ------
+  function loop(ts){ if(!state.running) return; const dt=Math.min(32, ts-last)/16.6667; last=ts; state.t+=dt; state.slowTimer=Math.max(0,state.slowTimer-dt*0.0167*60); state.invertTimer=Math.max(0,state.invertTimer-dt*0.0167*60); state.shakeTimer=Math.max(0,state.shakeTimer-dt*0.0167*60); state.speed+=state.accel*(1+state.t*0.01); const effSpeed = state.speed * speedScale * (state.slowTimer>0 ? 0.7 : 1);
+    ctx.clearRect(0,0,W,H);
+    if(state.shakeTimer>0){ const a=state.shakeTimer; const mag=Math.min(8, 2+a*3); ctx.save(); ctx.translate((Math.random()-0.5)*mag,(Math.random()-0.5)*mag); drawBackground(dt*16, effSpeed); } else { drawBackground(dt*16, effSpeed); }
+    spawnTimer -= dt; if(spawnTimer<=0){ spawnObstacle(); const intervalBase=Math.max(30/effSpeed, rand(1.2,2.4)); spawnTimer = intervalBase * speedScale * SPAWN_GAP_MULT; }
+    player.vy += state.gravity; player.y += player.vy; const gy=groundY()-player.r; if(player.y>=gy){ if(!player.onGround){ puff(player.x, gy+player.r); player.onGround=true; SFX.land(); } player.y=gy; player.vy=0; }
+    if(jumpQueued){ jumpQueued=false; tryJump(); }
+    for(let i=state.obstacles.length-1;i>=0;i--){ const o=state.obstacles[i]; o.x -= effSpeed * 7 * dt; if(o.x+o.w < -20){ state.obstacles.splice(i,1); state.score += 3; SFX.score(); continue; } if(circleRectOverlap(player.x,player.y,player.r*0.9, o.x,o.y,o.w,o.h)){ handleCollision(o,i); if(!state.running){ if(state.shakeTimer>0) ctx.restore?.(); return; } } }
+    for(let i=state.dust.length-1;i>=0;i--){ const p=state.dust[i]; p.x+=p.vx; p.y+=p.vy; p.vy+=0.25; p.a*=0.93; p.r*=0.98; if(p.a<0.02) state.dust.splice(i,1); }
+    for(const o of state.obstacles){ drawObstacle(o); }
+    ctx.save(); ctx.fillStyle='rgba(255,255,255,.7)'; for(const p of state.dust){ ctx.globalAlpha=p.a; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); } ctx.restore();
+    drawPlayer();
+    $score.textContent=Math.floor(state.score); $speed.textContent=(effSpeed/state.baseSpeed).toFixed(2)+'x'; if(state.shakeTimer>0) ctx.restore(); requestAnimationFrame(loop);
+  }
+
+  function drawPlayer(){ const x=player.x, y=player.y, r=player.r; ctx.fillStyle='#d7b899'; ctx.strokeStyle='#a7845c'; ctx.lineWidth=3; ctx.fillRect(x-r,y-r,r*2,r*2); ctx.strokeRect(x-r+1.5,y-r+1.5,r*2-3,r*2-3); ctx.strokeStyle='#ffbf66'; ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(x-r+6,y-r+10); ctx.lineTo(x+r-6,y+r-10); ctx.stroke(); ctx.fillStyle='#232f3e'; ctx.beginPath(); ctx.arc(x-8,y-6,4,0,Math.PI*2); ctx.arc(x+8,y-6,4,0,Math.PI*2); ctx.fill(); ctx.lineWidth=3; ctx.strokeStyle='#232f3e'; ctx.beginPath(); ctx.arc(x,y+6,10,Math.PI*0.2,Math.PI*0.8); ctx.stroke(); const sx=x, sy=groundY()+10, sw=r*1.3, sh=8; ctx.save(); ctx.globalAlpha=0.25*(1-Math.min(1,(sy-y)/200)); ctx.fillStyle='#000'; ctx.beginPath(); ctx.ellipse(sx,sy,sw,sh,0,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+
+  function circleRectOverlap(cx,cy,cr, rx,ry,rw,rh){ const nx=Math.max(rx, Math.min(cx, rx+rw)); const ny=Math.max(ry, Math.min(cy, ry+rh)); const dx=cx-nx, dy=cy-ny; return (dx*dx+dy*dy) < cr*cr; }
+
+  // ---- Test helpers ----
+  function __stepForTest(){ for(let i=state.obstacles.length-1;i>=0;i--){ const o=state.obstacles[i]; if(circleRectOverlap(player.x,player.y,player.r*0.9,o.x,o.y,o.w,o.h)){ handleCollision(o,i); } } }
+  function __spawnForTest(type){ const prev=state.obstacles.length; const dims = { coupon:[60,40], deal:[36,50], outofstock:[50,36], badreview:[40,32], returnstorm:[48,48], dog404:[50,50] }[type]||[40,40]; const [w,h]=dims; const y = (type==='coupon'||type==='deal') ? groundY()-h-LANE_SINGLE() : groundY()-h; state.obstacles.push({x:player.x-10,y,w,h,type}); return state.obstacles.length-prev; }
+  window.__JBR_TEST__ = { circleRectOverlap, resize, canvas, player, state, __stepForTest, __spawnForTest, getSpeed:()=>speedScale };
+
+  // ------ Buttons & Share ------
+  document.getElementById('playBtn').addEventListener('click', ()=>{ start(); SFX.whoosh(); });
+  document.getElementById('retryBtn').addEventListener('click', ()=>{ start(); SFX.whoosh(); });
+  document.getElementById('shareBtn').addEventListener('click', async()=>{ const text=`I scored ${Math.floor(state.best)} in Jumping Ball Runner! Can you beat me?`; if(navigator.share){ try{ await navigator.share({title:'Jumping Ball Runner', text}); }catch(e){} } else { navigator.clipboard && navigator.clipboard.writeText(text); alert('Score copied! Share it with your friends.'); } });
+  window.addEventListener('pointerdown', ensureAudio, {once:true}); window.addEventListener('keydown', ensureAudio, {once:true});
+  document.addEventListener('visibilitychange', ()=>{ if(document.hidden) state.running=false; });
+  window.addEventListener('focus', ()=>{ if($overlay.style.display==='none' && $startPanel.style.display==='none' && $gameOverPanel.style.display==='none'){ state.running=true; last=performance.now(); requestAnimationFrame(loop);} });
+
+  // ------ Tests ------
+  function runTests(){ const badge=document.getElementById('testBadge'); const t=[]; const assert=(n,c)=>{ t.push({n, c}); if(!c) console.error('TEST FAIL:', n); };
+    try{ resize(); }catch(e){}
+    assert('canvas.width set', canvas.width>0); assert('canvas.height set', canvas.height>0);
+    assert('collision: inside', circleRectOverlap(10,10,5,6,6,8,8)===true);
+    assert('collision: outside', circleRectOverlap(0,0,3,20,20,10,10)===false);
+    assert('collision: edge touch', circleRectOverlap(10,10,5,15,5,10,10)===true);
+    // infinite jump weaker
+    player.onGround=true; player.vy=0; tryJump(); const groundVy=player.vy; player.onGround=false; player.vy=2; tryJump(); const airVy=player.vy; assert('air jump weaker', Math.abs(airVy - state.jumpV*state.airJumpFactor) < 0.001 && airVy > groundVy*state.airJumpFactor - 0.001);
+    // airborne collectibles: spawn coupon and ensure above ground
+    const before=state.obstacles.length; __spawnForTest('coupon'); const c=state.obstacles[before]; const gy=groundY(); assert('coupon airborne', c.y + c.h <= gy - 40);
+    // speed slider changes scale
+    const prevScale = speedScale; speedScale=0.10; assert('speed scale settable', Math.abs(speedScale-0.10)<1e-6); speedScale=prevScale;
+    const all=t.every(x=>x.c); if(all){ badge.style.display='block'; setTimeout(()=>badge.style.display='none',2000);} else { badge.style.display='block'; badge.textContent='❌ Tests failing'; badge.style.background='rgba(255,0,0,.2)'; }
+  }
+  window.addEventListener('load', runTests);
+})();
+</script>
+</body>
+</html>
